@@ -1,0 +1,76 @@
+version: '3.9'
+
+# ============================================================
+# DOCKER COMPOSE - Threat Intel Fusion Engine
+# ============================================================
+# Starts all services together:
+#   - backend: FastAPI server (port 8000)
+#   - frontend: React dev server (port 5173)
+#   - redis: Cache + deduplication (port 6379)
+#
+# Usage:
+#   docker-compose up --build      # First time
+#   docker-compose up              # Subsequent starts
+#   docker-compose down            # Stop everything
+# ============================================================
+
+services:
+
+  # -----------------------------------------------------------
+  # REDIS - In-memory cache for IOC deduplication
+  # No configuration needed for basic usage
+  # -----------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: threat-intel-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # BACKEND - FastAPI server
+  # -----------------------------------------------------------
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: threat-intel-backend
+    ports:
+      - "8000:8000"       # FastAPI + WebSocket endpoint
+    environment:
+      - REDIS_URL=redis://redis:6379  # Use docker service name
+    env_file:
+      - .env              # Load your Supabase keys etc.
+    volumes:
+      - ./backend:/app    # Hot reload in development
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # --reload enables auto-restart when Python files change
+
+  # -----------------------------------------------------------
+  # FRONTEND - React + Vite dev server
+  # -----------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: threat-intel-frontend
+    ports:
+      - "5173:5173"
+    env_file:
+      - ./frontend/.env
+    volumes:
+      - ./frontend/src:/app/src    # Hot reload for React
+    depends_on:
+      - backend
+
+# Named volumes for data persistence
+volumes:
+  redis-data:

@@ -1,0 +1,57 @@
+# ============================================================
+# THREAT INTEL FUSION ENGINE - Backend Requirements
+# ============================================================
+# Install with: pip install -r requirements.txt
+
+# --- Web Framework ---
+fastapi==0.111.0          # Modern async web framework (powers all API routes)
+uvicorn[standard]==0.30.1 # ASGI server to run FastAPI
+python-multipart==0.0.9   # Enables file upload support in FastAPI
+
+# --- Database (Supabase / PostgreSQL) ---
+supabase==2.4.2            # Supabase Python client (auth + DB + realtime)
+psycopg2-binary==2.9.9    # PostgreSQL adapter for direct DB access if needed
+
+# --- Async HTTP Client ---
+aiohttp==3.9.5            # Async HTTP client for calling external APIs
+httpx==0.27.0             # Sync/async HTTP client used by FastAPI tests
+
+# --- Caching ---
+redis==5.0.4              # Redis client for IOC deduplication and caching
+
+# --- STIX / TAXII (Threat Intelligence Standards) ---
+stix2==3.0.1              # Parse and create STIX 2.0/2.1 objects
+taxii2-client==2.3.0      # TAXII 2.1 client for polling threat feeds
+
+# --- IOC Enrichment ---
+python-whois==0.9.4       # WHOIS lookups for domains
+requests==2.32.3          # Sync HTTP for simple enrichment API calls
+geoip2==4.8.0             # MaxMind GeoLite2 IP geolocation (free DB required)
+
+# --- Graph Analysis ---
+networkx==3.3             # In-memory graph analysis (community detection, centrality)
+
+# --- LLM Integration ---
+openai==1.35.3            # OpenAI API client for GPT-4 threat summaries
+
+# --- Background Tasks ---
+celery==5.4.0             # Distributed task queue for async IOC processing
+flower==2.0.1             # Celery monitoring dashboard (optional)
+
+# --- Data Validation ---
+pydantic==2.7.4           # Data models and validation (used throughout)
+pydantic-settings==2.3.3  # Settings management from .env files
+
+# --- Utilities ---
+python-dotenv==1.0.1      # Load environment variables from .env
+python-jose[cryptography]==3.3.0  # JWT token handling for auth
+passlib[bcrypt]==1.7.4    # Password hashing
+schedule==1.2.2           # Lightweight job scheduler for feed polling
+pytz==2024.1              # Timezone handling
+
+# --- Logging & Monitoring ---
+loguru==0.7.2             # Better logging with colors and structure
+
+# --- Testing ---
+pytest==8.2.2             # Test framework
+pytest-asyncio==0.23.7    # Async test support
