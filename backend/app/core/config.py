@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""      # Google Gemini - FREE at aistudio.google.com/app/apikey
     GROQ_API_KEY: str = ""        # Groq - FREE no credit card at console.groq.com
 
+    # Email alert settings (add to .env)
+    SMTP_HOST:     str = "smtp.gmail.com"
+    SMTP_PORT:     int = 587
+    SMTP_USER:     str = ""
+    SMTP_PASSWORD: str = ""
+    ALERT_EMAIL:   str = "klu2300030288@outlook.com"
+
     REDIS_URL: str = "redis://localhost:6379"
     CORS_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:3000"]
 

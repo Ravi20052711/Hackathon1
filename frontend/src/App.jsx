@@ -29,6 +29,8 @@ import IOCExplorerPage from './pages/IOCExplorerPage'
 import AlertsPage from './pages/AlertsPage'
 import GraphViewPage from './pages/GraphViewPage'
 import HuntPage from './pages/HuntPage'
+import MyLogsPage from './pages/MyLogsPage'
+import IngestLogsPage from './pages/IngestLogsPage'
 
 // Shared layout with sidebar navigation
 import Layout from './components/Dashboard/Layout'
@@ -74,6 +76,8 @@ function AppRoutes() {
       <Route path="/alerts" element={<ProtectedRoute><AlertsPage /></ProtectedRoute>} />
       <Route path="/graph" element={<ProtectedRoute><GraphViewPage /></ProtectedRoute>} />
       <Route path="/hunt" element={<ProtectedRoute><HuntPage /></ProtectedRoute>} />
+      <Route path="/mylogs" element={<ProtectedRoute><MyLogsPage /></ProtectedRoute>} />
+      <Route path="/ingest" element={<ProtectedRoute><IngestLogsPage /></ProtectedRoute>} />
 
       {/* Catch-all → redirect to dashboard */}
       <Route path="*" element={<Navigate to="/" />} />

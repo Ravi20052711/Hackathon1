@@ -135,9 +135,16 @@ class GraphAnalyzer:
                 })
 
         # Add threat category nodes for important tags
-        important_tags = ['c2', 'botnet', 'ransomware', 'phishing', 'malware', 'dropper']
+        # Expanded tags matching real feed tag names
+        important_tags = [
+            'c2', 'botnet', 'ransomware', 'phishing', 'malware', 'dropper',
+            'Emotet', 'AsyncRAT', 'AgentTesla', 'RedLineStealer', 'Raccoon',
+            'FormBook', 'TrickBot', 'Dridex', 'IcedID', 'QakBot',
+            'trojan', 'rat', 'stealer', 'loader', 'backdoor', 'exploit',
+            'scanner', 'tor-exit', 'spam', 'miner', 'Cobalt Strike',
+        ]
         for tag in important_tags:
-            if tag not in tag_groups or len(tag_groups[tag]) < 2:
+            if tag not in tag_groups or len(tag_groups[tag]) < 1:
                 continue
             tag_id = f"tag_{tag}"
             label_map = {

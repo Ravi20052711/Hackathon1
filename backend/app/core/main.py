@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
 
-from app.api import auth, ioc, alerts, graph, hunt, feed, reports
+from app.api import auth, ioc, alerts, graph, hunt, feed, reports, systemlogs
 from app.core.config import settings
 from app.core.database import init_db  # Local SQLite init
 
@@ -52,6 +52,7 @@ app.include_router(graph.router, prefix="/api/graph", tags=["Graph"])
 app.include_router(hunt.router, prefix="/api/hunt", tags=["Hunt"])
 app.include_router(feed.router, prefix="/api/feed", tags=["Feed"])
 app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
+app.include_router(systemlogs.router, prefix="/api/systemlogs", tags=["System Logs"])
 
 
 @app.get("/api/health")

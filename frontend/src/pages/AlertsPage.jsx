@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { AlertTriangle, ChevronDown, ChevronUp, Send, Shield, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ChevronDown, ChevronUp, Send, Shield, RefreshCw, Search, X, Filter } from 'lucide-react'
 import axios from 'axios'
 import toast from 'react-hot-toast'
 
@@ -110,6 +110,25 @@ function AlertCard({ alert }) {
                 </div>
               )}
 
+              {/* LIVE INTEL - Real-time external API results */}
+              {alert.live_intel?.length > 0 && (
+                <div>
+                  <p className="text-xs font-mono text-cyan-400 uppercase mb-2">
+                    🌐 {alert.live_threats_found > 0 ? '⚡ Live Threat Intel' : '🌐 Live Intel'} — Real-time External Check
+                  </p>
+                  <div className="space-y-1">
+                    {alert.live_intel.map((item, i) => (
+                      <div key={i} className={"flex items-start gap-2 rounded p-2 text-xs font-mono border " + (alert.live_threats_found > 0 ? "bg-orange-500/5 border-orange-500/20" : "bg-cyan-500/5 border-cyan-500/20")}>
+                        <span className={alert.live_threats_found > 0 ? "text-orange-400" : "text-cyan-400"}>
+                          {alert.live_threats_found > 0 ? "⚡" : "ℹ️"}
+                        </span>
+                        <span className="text-gray-300 flex-1">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Extracted IOCs */}
               {alert.extracted_iocs?.length > 0 && (
                 <div>
@@ -175,6 +194,8 @@ export default function AlertsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [rawLog, setRawLog] = useState('')
   const [source, setSource] = useState('manual')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [severityFilter, setSeverityFilter] = useState('all')
 
   const token = localStorage.getItem('access_token')
   const headers = { Authorization: `Bearer ${token}` }
@@ -191,6 +212,20 @@ export default function AlertsPage() {
   }
 
   useEffect(() => { loadAlerts() }, [])
+
+  // Live search — filters alerts as you type
+  const filteredAlerts = alerts.filter(alert => {
+    const q = searchQuery.toLowerCase()
+    const matchesSearch = !q ||
+      alert.raw_log?.toLowerCase().includes(q) ||
+      alert.severity?.toLowerCase().includes(q) ||
+      alert.source_system?.toLowerCase().includes(q) ||
+      alert.mitre_techniques?.some(t => t.toLowerCase().includes(q)) ||
+      alert.extracted_iocs?.some(ioc => ioc.toLowerCase().includes(q)) ||
+      String(alert.risk_score).includes(q)
+    const matchesSeverity = severityFilter === 'all' || alert.severity === severityFilter
+    return matchesSearch && matchesSeverity
+  })
 
   const submitAlert = async () => {
     if (!rawLog.trim()) return toast.error('Paste a log line first')
@@ -294,11 +329,50 @@ export default function AlertsPage() {
 
       {/* Alert List */}
       <div>
+        {/* Search Bar */}
+        <div className="flex gap-3 mb-4 flex-wrap">
+          <div className="relative flex-1 min-w-48">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search alerts by IP, domain, hash, technique..."
+              className="w-full bg-black/30 border border-gray-700 rounded-lg pl-9 pr-8 py-2 text-white font-mono text-xs focus:outline-none focus:border-cyan-400 placeholder-gray-600"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-white">
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            {['all', 'critical', 'high', 'medium', 'low'].map(s => (
+              <button key={s}
+                onClick={() => setSeverityFilter(s)}
+                className={"px-3 py-2 rounded-lg text-xs font-mono font-bold uppercase transition-all border " + (
+                  severityFilter === s
+                    ? s === 'critical' ? 'bg-red-500/20 text-red-400 border-red-500/40'
+                    : s === 'high' ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                    : s === 'medium' ? 'bg-blue-500/20 text-blue-400 border-blue-500/40'
+                    : s === 'low' ? 'bg-green-500/20 text-green-400 border-green-500/40'
+                    : 'bg-cyan-500/20 text-cyan-400 border-cyan-500/40'
+                    : 'bg-gray-800 text-gray-500 border-gray-700 hover:border-gray-500'
+                )}>
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <p className="text-xs font-mono text-gray-500 uppercase mb-3">
-          {alerts.length} Enriched Alerts — click any to expand
+          {filteredAlerts.length} of {alerts.length} alerts
+          {searchQuery && <span className="text-cyan-400"> — searching: "{searchQuery}"</span>}
+          {severityFilter !== 'all' && <span className="text-amber-400"> — filter: {severityFilter}</span>}
         </p>
         {loading && <p className="text-gray-600 font-mono text-sm text-center py-8">Loading...</p>}
-        {!loading && alerts.length === 0 && (
+        {!loading && filteredAlerts.length === 0 && (
           <div className="glass-card p-8 text-center">
             <Shield size={32} className="text-gray-700 mx-auto mb-3" />
             <p className="text-gray-500 font-mono text-sm">No alerts yet</p>

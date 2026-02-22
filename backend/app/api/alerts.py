@@ -1,176 +1,159 @@
 """
-=============================================================
-API ROUTER - SIEM Alerts
-=============================================================
-Handles ingestion and enrichment of SIEM alerts.
-An alert comes in as a raw log line, gets processed to:
-  1. Extract IOCs (IPs, domains, hashes)
-  2. Query threat intel DB for each IOC
-  3. Calculate composite risk score
-  4. Generate LLM threat summary
-  5. Return enriched alert with recommendations
-
-Routes:
-  GET  /api/alerts/          - List enriched alerts
-  POST /api/alerts/          - Submit raw alert for enrichment
-  GET  /api/alerts/{id}      - Get single enriched alert
-  GET  /api/alerts/live      - WebSocket for real-time alerts
-=============================================================
+API ROUTER - Alerts with Real-time Threat Checking
 """
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from app.models.schemas import AlertCreate, AlertSeverity
-from app.services.siem.alert_enricher import AlertEnricher
-from app.core.supabase_client import get_supabase
-from typing import List
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Body
+from app.core.database import get_db
 from datetime import datetime
-import uuid
-import asyncio
-import json
-import logging
-import random
+import uuid, json, asyncio, random, logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Alert enrichment service
-enricher = AlertEnricher()
 
-# WebSocket connection manager for real-time alert streaming
 class ConnectionManager:
-    """Manages active WebSocket connections for live feed."""
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-        logger.info(f"WebSocket connected. Total: {len(self.active_connections)}")
 
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        """Send message to ALL connected WebSocket clients."""
-        for connection in self.active_connections:
+        for conn in self.active_connections[:]:
             try:
-                await connection.send_json(message)
-            except Exception:
-                pass  # Client disconnected, will be cleaned up
+                await conn.send_json(message)
+            except:
+                self.active_connections.remove(conn)
+
 
 manager = ConnectionManager()
 
 
+def row_to_dict(row):
+    if row is None:
+        return None
+    d = dict(row)
+    for field in ['extracted_iocs', 'recommended_actions', 'mitre_techniques']:
+        if field in d and isinstance(d[field], str):
+            try:
+                d[field] = json.loads(d[field])
+            except:
+                d[field] = []
+    # Parse db_matches if stored
+    if 'db_matches' in d and isinstance(d.get('db_matches'), str):
+        try:
+            d['db_matches'] = json.loads(d['db_matches'])
+        except:
+            d['db_matches'] = []
+    if 'live_intel' in d and isinstance(d.get('live_intel'), str):
+        try:
+            d['live_intel'] = json.loads(d['live_intel'])
+        except:
+            d['live_intel'] = []
+    return d
+
+
 @router.get("/")
 async def list_alerts(limit: int = 20):
-    """Return recent enriched alerts, sorted by risk score."""
-    supabase = get_supabase()
-
-    if supabase is None:
-        return _get_demo_alerts()
-
+    db = get_db()
     try:
-        result = supabase.table("alerts").select("*").order("risk_score", desc=True).limit(limit).execute()
-        return result.data or _get_demo_alerts()
-    except Exception as e:
-        logger.error(f"List alerts error: {e}")
-        return _get_demo_alerts()
+        rows = db.execute(
+            "SELECT * FROM alerts ORDER BY risk_score DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [row_to_dict(r) for r in rows]
+    finally:
+        db.close()
 
 
 @router.post("/")
-async def submit_alert(alert: AlertCreate):
+async def submit_alert(alert: dict = Body(...)):
     """
-    Submit a raw SIEM log for enrichment.
-    Extracts IOCs, queries threat intel, generates AI summary.
+    Submit raw log for enrichment.
+    Checks against:
+    1. Local SQLite database (instant)
+    2. AbuseIPDB live API (if key set)
+    3. VirusTotal live API (if key set)
+    4. Free IP geo lookup (always works)
     """
-    logger.info(f"📨 New alert received from {alert.source_system}")
+    try:
+        from app.services.siem.alert_enricher import AlertEnricher
+        enricher = AlertEnricher()
+        enriched = await enricher.enrich_alert(alert)
 
-    # Run enrichment pipeline on the raw log
-    enriched = await enricher.enrich_alert(alert)
+        # Save to DB
+        db = get_db()
+        try:
+            db.execute("""
+                INSERT INTO alerts
+                (id, raw_log, source_system, severity, risk_score,
+                 extracted_iocs, llm_summary, recommended_actions,
+                 mitre_techniques, created_at, enriched_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                enriched['id'],
+                enriched['raw_log'],
+                enriched['source_system'],
+                enriched['severity'],
+                enriched['risk_score'],
+                json.dumps(enriched.get('extracted_iocs', [])),
+                enriched.get('llm_summary', ''),
+                json.dumps(enriched.get('recommended_actions', [])),
+                json.dumps(enriched.get('mitre_techniques', [])),
+                enriched['created_at'],
+                enriched.get('enriched_at'),
+            ))
+            db.commit()
+        finally:
+            db.close()
 
-    # Save to Supabase
-    supabase = get_supabase()
-    if supabase:
-        supabase.table("alerts").insert(enriched).execute()
+        await manager.broadcast({"event": "new_alert", "data": enriched})
+        return enriched
 
-    # Broadcast to all WebSocket clients (real-time feed)
-    await manager.broadcast({
-        "event": "new_alert",
-        "data": enriched
-    })
-
-    return enriched
+    except Exception as e:
+        logger.error(f"Alert enrichment error: {e}")
+        import traceback; traceback.print_exc()
+        now = datetime.utcnow().isoformat()
+        return {
+            "id": str(uuid.uuid4()),
+            "raw_log": alert.get('raw_log', ''),
+            "source_system": alert.get('source_system', 'manual'),
+            "severity": "medium", "risk_score": 0,
+            "extracted_iocs": [], "db_matches": [],
+            "live_intel": [], "live_threats_found": 0,
+            "llm_summary": f"Enrichment error: {str(e)}",
+            "recommended_actions": ["Check backend logs"],
+            "mitre_techniques": [], "created_at": now, "enriched_at": now,
+        }
 
 
 @router.websocket("/ws/live")
 async def websocket_live_feed(websocket: WebSocket):
-    """
-    WebSocket endpoint for real-time alert streaming.
-    Frontend connects here to receive live updates without polling.
-    Also sends simulated alerts every few seconds for demo purposes.
-    """
     await manager.connect(websocket)
     try:
-        # Send simulated live events to demonstrate real-time capability
         while True:
-            await asyncio.sleep(random.uniform(3, 8))  # Random interval 3-8 seconds
-
-            # Generate a simulated threat event
-            demo_event = _generate_live_event()
-            await manager.broadcast(demo_event)
-
+            await asyncio.sleep(random.uniform(4, 9))
+            await manager.broadcast(_generate_live_event())
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-        logger.info("WebSocket client disconnected")
 
 
 def _generate_live_event():
-    """Generate realistic simulated threat events for demo mode."""
-    event_types = [
-        {"type": "new_ioc", "severity": "high", "title": "Malicious IP Detected",
-         "desc": "New C2 server communicating with internal hosts", "ioc": "45.33.32.156"},
-        {"type": "alert_triggered", "severity": "critical", "title": "Ransomware Hash Match",
-         "desc": "Known ransomware binary hash detected on endpoint", "ioc": "deadbeef12345678"},
-        {"type": "new_ioc", "severity": "medium", "title": "Suspicious Domain Query",
-         "desc": "DGA-generated domain queried by multiple hosts", "ioc": "xn--wbk5a5a.xyz"},
-        {"type": "hunt_result", "severity": "high", "title": "Beaconing Pattern Found",
-         "desc": "Regular outbound connections matching C2 signature", "ioc": "103.24.77.10"},
-        {"type": "alert_triggered", "severity": "low", "title": "Port Scan Detected",
-         "desc": "External IP scanning internal network ports", "ioc": "198.51.100.2"},
+    events = [
+        {"type": "new_ioc", "severity": "high",     "title": "Malicious IP Detected",  "ioc": "45.33.32.156"},
+        {"type": "alert",   "severity": "critical",  "title": "Ransomware Hash Match",  "ioc": "deadbeef12345678"},
+        {"type": "new_ioc", "severity": "medium",    "title": "Suspicious Domain",      "ioc": "xn--wbk5a5a.xyz"},
+        {"type": "hunt",    "severity": "high",      "title": "C2 Beaconing Pattern",   "ioc": "103.24.77.10"},
     ]
-
-    event = random.choice(event_types)
-    return {
-        "event": event["type"],
-        "data": {
-            "id": str(uuid.uuid4()),
-            "event_type": event["type"],
-            "severity": event["severity"],
-            "title": event["title"],
-            "description": event["desc"],
-            "ioc_value": event["ioc"],
-            "risk_score": random.randint(30, 99),
-            "source": random.choice(["Splunk", "Elastic", "Sentinel", "AlienVault OTX"]),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-    }
-
-
-def _get_demo_alerts():
-    """Demo alerts when Supabase is not configured."""
-    return [
-        {"id": "a1", "severity": "critical", "risk_score": 98,
-         "source_system": "Splunk", "extracted_iocs": ["192.168.1.100", "evil-domain.xyz"],
-         "llm_summary": "APT-29 affiliated C2 infrastructure detected. Immediate isolation recommended.",
-         "recommended_actions": ["Block IP at perimeter firewall", "Isolate affected endpoints", "Initiate IR process"],
-         "mitre_techniques": ["T1071.001", "T1566.001"],
-         "raw_log": "2024-06-20 10:23:45 DENY TCP 192.168.1.100:443 -> 10.0.0.5:8443",
-         "created_at": "2024-06-20T10:23:45Z"},
-        {"id": "a2", "severity": "high", "risk_score": 77,
-         "source_system": "Elastic",  "extracted_iocs": ["evil-domain.xyz"],
-         "llm_summary": "Phishing domain used in credential harvesting campaign targeting financial sector.",
-         "recommended_actions": ["Block domain in DNS", "Reset affected credentials", "Enable MFA"],
-         "mitre_techniques": ["T1566.002", "T1078"],
-         "raw_log": "DNS query for evil-domain.xyz from 10.0.1.42",
-         "created_at": "2024-06-20T09:15:00Z"},
-    ]
+    e = random.choice(events)
+    return {"event": e["type"], "data": {
+        "id": str(uuid.uuid4()), "event_type": e["type"],
+        "severity": e["severity"], "title": e["title"],
+        "ioc_value": e["ioc"], "risk_score": random.randint(40, 99),
+        "source": random.choice(["Splunk", "Elastic", "CrowdStrike"]),
+        "timestamp": datetime.utcnow().isoformat()
+    }}

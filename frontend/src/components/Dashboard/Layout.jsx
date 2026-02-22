@@ -15,7 +15,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Shield, LayoutDashboard, Database, Bell,
-  GitGraph, Search, FileText, LogOut,
+  GitGraph, Search, FileText, LogOut, Upload,
   ChevronLeft, ChevronRight, Activity, Zap
 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
@@ -27,6 +27,8 @@ const NAV_ITEMS = [
   { to: '/alerts', icon: Bell, label: 'Alert Center' },
   { to: '/graph', icon: GitGraph, label: 'Graph View' },
   { to: '/hunt', icon: Search, label: 'Hunt Center' },
+  { to: '/mylogs', icon: FileText, label: 'My Logs' },
+  { to: '/ingest', icon: Upload, label: 'Ingest Logs' },
 ]
 
 export default function Layout({ children }) {
